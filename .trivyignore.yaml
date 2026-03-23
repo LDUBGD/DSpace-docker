@@ -1,0 +1,24 @@
+vulnerabilities:
+  - id: CVE-2024-47561
+    expired_at: 2026-05-31
+    statement: "Temporary risk acceptance: upstream DSpace image (Apache Avro transitive dependency). Review monthly and remove after upstream fix."
+
+  - id: CVE-2025-66516
+    expired_at: 2026-05-31
+    statement: "Temporary risk acceptance: upstream DSpace image (Apache Tika transitive dependency). Review monthly and remove after upstream fix."
+
+  - id: CVE-2025-54988
+    expired_at: 2026-05-31
+    statement: "Temporary risk acceptance: upstream DSpace image (Apache Tika PDF parser dependency). Review monthly and remove after upstream fix."
+
+  - id: CVE-2025-12383
+    expired_at: 2026-05-31
+    statement: "Temporary risk acceptance: upstream DSpace image (Jersey client transitive dependency). Review monthly and remove after upstream fix."
+
+  - id: CVE-2025-68121
+    expired_at: 2026-05-31
+    statement: "Temporary risk acceptance: postgres:15 image (gosu binary / Go stdlib in upstream base image). Review monthly and remove after upstream fix."
+
+  - id: CVE-2023-44981
+    expired_at: 2026-05-31
+    statement: "Temporary risk acceptance: upstream DSpace image finding; review monthly and remove after upstream fix."

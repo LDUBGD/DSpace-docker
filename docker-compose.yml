@@ -1,0 +1,308 @@
+services:
+  # ===================================================
+  # TRAEFIK (Reverse Proxy)
+  # ===================================================
+  traefik:
+    image: traefik:${TRAEFIK_VERSION:-v3.6.8}
+    container_name: dspace-traefik
+    restart: unless-stopped
+    command:
+      - "--log.level=INFO"
+      # !!! 1. Вмикаємо запис логів у файл
+      - "--log.filePath=/var/log/traefik/traefik.log"
+      - "--log.format=json"
+      # !!! 2. Вмикаємо Access Logs (хто куди ходив)
+      - "--accesslog=true"
+      - "--accesslog.filePath=/var/log/traefik/access.log"
+      - "--accesslog.bufferingsize=100" # Оптимізація запису
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.metrics.address=:8082"
+      - "--entrypoints.web.forwardedHeaders.insecure=false"
+      - "--entrypoints.web.forwardedHeaders.trustedIPs=${DSPACENET_SUBNET:-172.23.0.0/16}" 
+      - "--metrics.prometheus=true"
+      - "--metrics.prometheus.entryPoint=metrics"
+      - "--metrics.prometheus.addEntryPointsLabels=true"
+      - "--metrics.prometheus.addServicesLabels=true"
+      - "--metrics.prometheus.addRoutersLabels=true"
+      - "--ping=true"
+    ports:
+      # Tunnel-safe default: Traefik is reachable only from localhost unless explicitly opened.
+      - "${TRAEFIK_BIND_IP:-127.0.0.1}:${TRAEFIK_ENTRYPOINT_PORT:-8080}:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # !!! 3. Монтуємо папку логів з хоста
+      - ${VOL_LOGS_PATH:-./data/logs}/traefik:/var/log/traefik
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    networks:
+      - dspacenet
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-dash.rule=Host(`${TRAEFIK_DASHBOARD_HOST}`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))"
+      - "traefik.http.routers.traefik-dash.entrypoints=web"
+      - "traefik.http.routers.traefik-dash.priority=200"
+      - "traefik.http.routers.traefik-dash.service=api@internal"
+      - "traefik.http.routers.traefik-dash.middlewares=traefik-auth,traefik-allow"
+      - "traefik.http.middlewares.traefik-auth.basicauth.users=${TRAEFIK_DASHBOARD_USERS}"
+      - "traefik.http.middlewares.traefik-allow.ipallowlist.sourcerange=${TRAEFIK_DASHBOARD_ALLOWLIST}"
+      # Security middleware (applied to UI/API routers below)
+      - "traefik.http.middlewares.forwarded-https.headers.customRequestHeaders.X-Forwarded-Proto=https"
+      - "traefik.http.middlewares.forwarded-https.headers.customRequestHeaders.X-Forwarded-Port=443"
+      - "traefik.http.middlewares.security-headers.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.security-headers.headers.customFrameOptionsValue=${SECURITY_FRAME_OPTIONS:-SAMEORIGIN}"
+      - "traefik.http.middlewares.security-headers.headers.referrerPolicy=strict-origin-when-cross-origin"
+      - "traefik.http.middlewares.security-headers.headers.customResponseHeaders.Content-Security-Policy-Report-Only=${CSP_REPORT_ONLY_POLICY:-default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'}"
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    # !!! 4. Ротація логів самого Docker (stdout)
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+
+  # ===================================================
+  # DATABASE
+  # ===================================================
+  dspacedb:
+    container_name: dspacedb
+    image: "docker.io/postgres:${POSTGRES_VERSION:-15}"
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Kyiv}
+      PGDATA: ${POSTGRES_PGDATA:-/pgdata}
+      POSTGRES_DB: ${POSTGRES_DB:-dspace}
+      POSTGRES_USER: ${POSTGRES_USER:-dspace}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dspace}
+    networks:
+      - dspacenet
+    volumes:
+      - ${VOL_POSTGRESQL_PATH:-./data/pgdata}:${POSTGRES_PGDATA:-/pgdata}
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dspace} -d ${POSTGRES_DB:-dspace} -h 127.0.0.1 -p ${POSTGRES_INTERNAL_PORT:-5432}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ===================================================
+  # SEARCH ENGINE (Solr)
+  # ===================================================
+  dspacesolr:
+    container_name: dspacesolr
+    image: "${DOCKER_REGISTRY:-docker.io}/${DOCKER_OWNER:-dspace}/dspace-solr:${DSPACE_SOLR_VER:-dspace-9_x}"
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Kyiv}
+      SOLR_OPTS: "-Dsolr.config.lib.enabled=true"
+    networks:
+      - dspacenet
+    working_dir: /var/solr/data
+    volumes:
+      - ${VOL_SOLR_PATH:-./data/solr}:/var/solr/data
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    user: root
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -e
+        if [ ! -d "/var/solr/data/authority" ]; then
+            echo "Initializing Solr cores..."
+            init-var-solr
+            precreate-core authority /opt/solr/server/solr/configsets/authority
+            cp -r /opt/solr/server/solr/configsets/authority/* authority
+            precreate-core oai /opt/solr/server/solr/configsets/oai
+            cp -r /opt/solr/server/solr/configsets/oai/* oai
+            precreate-core search /opt/solr/server/solr/configsets/search
+            cp -r /opt/solr/server/solr/configsets/search/* search
+            precreate-core statistics /opt/solr/server/solr/configsets/statistics
+            cp -r /opt/solr/server/solr/configsets/statistics/* statistics
+            precreate-core qaevent /opt/solr/server/solr/configsets/qaevent
+            cp -r /opt/solr/server/solr/configsets/qaevent/* qaevent
+            precreate-core suggestion /opt/solr/server/solr/configsets/suggestion
+            cp -r /opt/solr/server/solr/configsets/suggestion/* suggestion
+            chown -R solr:solr /var/solr
+        else
+            echo "Solr cores already initialized."
+            chown -R solr:solr /var/solr
+        fi
+        runuser -u solr -- solr-foreground
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${SOLR_INTERNAL_PORT:-8983}/solr/ >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ===================================================
+  # BACKEND (REST API)
+  # ===================================================
+  dspace:
+    container_name: dspace
+    image: "${DOCKER_REGISTRY:-docker.io}/${DOCKER_OWNER:-dspace}/dspace:${DSPACE_REST_VER:-dspace-9_x}"
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Kyiv}
+      JAVA_OPTS: "${DSPACE_JAVA_OPTS:--Xmx2000m -Djava.security.egd=file:/dev/./urandom}"
+      dspace__P__dir: ${DSPACE_DIR:-/dspace}
+      dspace__P__name: ${DSPACE_NAME:-KDV Library Repository}
+      db__P__url: "jdbc:postgresql://dspacedb:${POSTGRES_INTERNAL_PORT:-5432}/${POSTGRES_DB:-dspace}"
+      solr__P__server: "http://dspacesolr:${SOLR_INTERNAL_PORT:-8983}/solr"
+      
+      # === ВИКОРИСТАННЯ ЗМІННИХ (NO HARDCODE) ===
+      dspace__P__server__P__url: ${DSPACE_REST_BASEURL:-http://localhost:8081/server}
+      dspace__P__ui__P__url: ${DSPACE_UI_BASEURL:-http://localhost:8081}
+      
+      # === CORS (Беремо зі змінної UI URL) ===
+      rest__P__cors__P__allowed__D__origins: ${DSPACE_UI_BASEURL:-http://localhost:8081}
+      
+      proxies__P__trusted__P__ipranges: ${DSPACENET_SUBNET:-172.23.0.0/16}
+    depends_on:
+      dspacedb:
+        condition: service_healthy
+      dspacesolr:
+        condition: service_healthy
+    networks:
+      - dspacenet
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    volumes:
+      - ${VOL_ASSETSTORE_PATH:-./data/assetstore}:/dspace/assetstore
+      - ${VOL_EXPORTS_PATH:-./data/exports}:/dspace/exports
+      - ${VOL_LOGS_PATH:-./data/logs}:/dspace/log
+      - ./dspace/config/local.cfg:/dspace/config/local.cfg
+      - ./dspace/config/submission-forms.xml:/dspace/config/submission-forms.xml
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -e
+        echo "Waiting for DB..."
+        until (</dev/tcp/dspacedb/5432) >/dev/null 2>&1; do sleep 1; done
+        echo "Running DB migrations..."
+        /dspace/bin/dspace database migrate
+        echo "Starting DSpace REST..."
+        java $$JAVA_OPTS -jar /dspace/webapps/server-boot.jar --dspace.dir=/dspace
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${DSPACE_INTERNAL_PORT:-8080}${DSPACE_REST_NAMESPACE:-/server}/api/core/sites >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+      
+    # --- TRAEFIK CONFIGURATION FOR BACKEND ---
+    labels:
+    - "traefik.enable=true"
+    - "traefik.http.routers.dspace-api.rule=Host(`${DSPACE_HOSTNAME}`) && PathPrefix(`/server`)"
+    - "traefik.http.routers.dspace-api.entrypoints=web"
+    - "traefik.http.routers.dspace-api.priority=100"
+    - "traefik.http.routers.dspace-api.middlewares=forwarded-https@docker,security-headers@docker"
+    - "traefik.http.services.dspace-api.loadbalancer.server.port=8080"
+
+
+  # ===================================================
+  # FRONTEND (Angular)
+  # ===================================================
+  dspace-angular:
+    container_name: dspace-angular
+    image: "${DOCKER_REGISTRY:-docker.io}/${DOCKER_OWNER:-dspace}/dspace-angular:${DSPACE_UI_VER:-dspace-9_x-dist}"
+    restart: unless-stopped
+    depends_on:
+      dspace:
+        condition: service_healthy
+    networks:
+      - dspacenet
+    volumes:
+      - ./ui-config/config.yml:/app/config/config.yml:ro
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    environment:
+      # Внутрішнє звернення контейнера Angular до API (залишаємо http і ім'я сервісу, бо це внутрішня мережа Docker)
+      DSPACE_REST_SSRBASEURL: http://dspace:8080/server
+      
+      # === ВИКОРИСТАННЯ ЗМІННИХ (NO HARDCODE) ===
+      DSPACE_UI_BASEURL: ${DSPACE_UI_BASEURL:-http://localhost:8081}
+      DSPACE_REST_BASEURL: ${DSPACE_REST_BASEURL:-http://localhost:8081/server}
+      
+      # Налаштування сервера Node.js
+      DSPACE_UI_HOST: 0.0.0.0
+      DSPACE_UI_PORT: ${DSPACE_UI_PORT:-8081}
+      DSPACE_UI_SSL: "false"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${DSPACE_UI_PORT:-8081}/ >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 60s
+    labels:
+    - "traefik.enable=true"
+    - "traefik.http.routers.dspace-ui.rule=Host(`${DSPACE_HOSTNAME}`)"
+    - "traefik.http.routers.dspace-ui.entrypoints=web"
+    - "traefik.http.routers.dspace-ui.priority=10"
+    - "traefik.http.routers.dspace-ui.middlewares=forwarded-https@docker,security-headers@docker"
+    - "traefik.http.services.dspace-ui.loadbalancer.server.port=8081"
+    - "traefik.http.services.dspace-ui.loadbalancer.passhostheader=true"
+
+  tunnel:
+    image: cloudflare/cloudflared:${CLOUDFLARE_TUNNEL_VERSION:-2026.2.0}
+    container_name: dspace-tunnel
+    restart: always
+    networks:
+      - dspacenet
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    command: tunnel --metrics 0.0.0.0:2000 run
+    depends_on:
+      - traefik
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:2000", "ready"]
+      interval: 20s
+      timeout: 3s
+      retries: 6
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  dspacedb-net: # Залишив сумісність
+  dspacenet:
+    name: dspacenet
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${DSPACENET_SUBNET:-172.23.0.0/16}
