@@ -271,3 +271,23 @@
 - `bash -n scripts/setup-configs.sh scripts/deploy-orchestrator-swarm.sh scripts/patch-local.cfg.sh scripts/patch-config.yml.sh scripts/patch-submission-forms.sh` — OK.
 - `shellcheck scripts/setup-configs.sh scripts/deploy-orchestrator-swarm.sh scripts/patch-local.cfg.sh scripts/patch-config.yml.sh scripts/patch-submission-forms.sh` — OK.
 - `bash scripts/setup-configs.sh --help` — OK.
+
+## 2026-05-07 — Versioned Swarm env secrets renderer
+
+### Зроблено
+- Додано `scripts/render-versioned-env-secret.sh` за Koha-патерном immutable Docker secrets із hash suffix.
+- Renderer створює:
+  - `DSPACE_POSTGRES_PASSWORD_SECRET_NAME` з hash значення `POSTGRES_PASSWORD`;
+  - `DSPACE_APP_ENV_PAYLOAD_SECRET_NAME` з hash runtime env payload без generated `*_SECRET_NAME`.
+- `scripts/deploy-orchestrator-swarm.sh` тепер викликає renderer перед `docker compose config`, щоб Swarm manifest отримував актуальні versioned secret names.
+- `.env.example` доповнено generated secret contract із placeholder hash-назвами та secret base variables.
+
+### Перевірено
+- `bash -n scripts/render-versioned-env-secret.sh scripts/deploy-orchestrator-swarm.sh` — OK.
+- `shellcheck scripts/render-versioned-env-secret.sh scripts/deploy-orchestrator-swarm.sh` — OK.
+- Renderer перевірено з mock `docker secret`: `POSTGRES_PASSWORD=change_me` зрендерив `dspace_postgres_password_fb86fb757d12`, payload secret отримав hash suffix, обидві назви записались у test env file.
+- `docker compose --env-file <test-env> -f docker-compose.yml -f docker-compose.swarm.yml config` — OK; manifest підставив versioned names для `app_env_payload` і `postgres_password`.
+
+### Data/impact
+- Реальні Docker secrets не створювались під час тесту; використовувався mock `docker`.
+- Реальні `env.dev.enc` і `env.prod.enc` не змінювались.
