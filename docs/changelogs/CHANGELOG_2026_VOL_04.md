@@ -291,3 +291,21 @@
 ### Data/impact
 - Реальні Docker secrets не створювались під час тесту; використовувався mock `docker`.
 - Реальні `env.dev.enc` і `env.prod.enc` не змінювались.
+
+## 2026-05-08 — DSpace backup/restore textfile metrics and smoke restore
+
+### Зроблено
+- `scripts/backup-dspace.sh` тепер публікує `dspace_backup_*` textfile metrics у `NODE_EXPORTER_TEXTFILE_DIR`.
+- `--dry-run` для backup не оновлює freshness-метрики, щоб не маскувати відсутність реального backup.
+- Додано `scripts/test-restore.sh`: smoke restore імпортує SQL dump із найновішого backup archive у тимчасовий PostgreSQL container і публікує `dspace_restore_smoke_*`.
+- `.env.example` доповнено `NODE_EXPORTER_TEXTFILE_DIR`, `BACKUP_METRICS_FILE`, `RESTORE_SMOKE_METRICS_FILE`.
+- `docs/scripts_runbook.md` оновлено manual execution для backup metrics і smoke restore.
+
+### Перевірено
+- `SERVER_ENV=prod bash scripts/backup-dspace.sh` успішно створив `cloud_metadata_2026-05-08_21-22.tar.gz`, `full_local_2026-05-08_21-22.tar.gz`, виконав rclone upload/check і записав `dspace_backup.prom`.
+- `SERVER_ENV=prod bash scripts/test-restore.sh` успішно імпортував SQL у тимчасовий PostgreSQL container; sanity check показав `63` таблиці і записав `dspace_restore_smoke.prom`.
+- Node exporter читає `dspace_backup_*` і `dspace_restore_smoke_*` зі status `1`.
+- VictoriaMetrics бачить обидві success-метрики з labels `job="node-exporter"`, `service="host"`, `exported_service="dspace"`.
+
+### Data/impact
+- Реальний backup/upload і restore smoke test виконано в prod-контексті, але restore smoke використовував тільки тимчасовий PostgreSQL container і не змінював production DSpace DB.

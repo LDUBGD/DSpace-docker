@@ -171,6 +171,7 @@ bash -lc 'source scripts/lib/autonomous-env.sh; load_autonomous_env "$PWD" dev; 
 - Завантажує cloud archive/checksum через `rclone` і перевіряє upload через `rclone check`.
 - Синхронізує локальне дзеркало assetstore через `rsync`, зберігаючи видалені файли в `assetstore-deleted/${DATE}`.
 - Зберігає metadata archives/checksums локально в `BACKUP_LOCAL_DIR` і чистить `full_local_*`, локальні `cloud_metadata_*` та `assetstore-deleted/*` за окремими retention-змінними.
+- Публікує textfile metrics `dspace_backup_*` у `NODE_EXPORTER_TEXTFILE_DIR`; `--dry-run` не оновлює freshness-метрики.
 - Очікує, що `BACKUP_LOCAL_DIR` підготовлено через `scripts/init-volumes.sh`; backup-скрипт має fallback-ініціалізацію, але cron-сценарій не повинен залежати від passwordless sudo.
 
 #### Manual execution
@@ -179,6 +180,21 @@ bash scripts/backup-dspace.sh --env dev --dry-run
 bash scripts/backup-dspace.sh --env prod --dry-run
 SERVER_ENV=dev bash scripts/backup-dspace.sh
 SERVER_ENV=prod bash scripts/backup-dspace.sh
+```
+
+### `scripts/test-restore.sh`
+
+#### Бізнес-логіка
+- Smoke restore: бере найновіший `cloud_metadata_*.tar.gz` або `full_local_*.tar.gz` з `BACKUP_LOCAL_DIR`, якщо archive path не передано.
+- Розпаковує SQL dump у тимчасовий каталог і імпортує його в тимчасовий PostgreSQL container.
+- Перевіряє, що після імпорту є таблиці, і публікує textfile metrics `dspace_restore_smoke_*`.
+- `--dry-run` не запускає контейнер і не оновлює freshness-метрики.
+
+#### Manual execution
+```bash
+SERVER_ENV=prod bash scripts/test-restore.sh
+bash scripts/test-restore.sh --env prod /data/backup/dspace/cloud_metadata_YYYY-MM-DD_HH-MM.tar.gz
+bash scripts/test-restore.sh --env prod --dry-run
 ```
 
 ### `scripts/restore-backup.sh`

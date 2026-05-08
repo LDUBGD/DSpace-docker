@@ -6,6 +6,10 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 PROJECT_ROOT=$(cd "$SCRIPT_DIR/.." &> /dev/null && pwd -P)
 ENVIRONMENT_ARG=""
 DRY_RUN=false
+backup_status="0"
+run_timestamp="$(date +%s)"
+success_timestamp="0"
+emit_metrics_on_exit="1"
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -48,6 +52,15 @@ source "$SCRIPT_DIR/lib/docker-runtime.sh"
 : "${BACKUP_RCLONE_REMOTE:?Variable BACKUP_RCLONE_REMOTE not set in env file}"
 : "${DB_SERVICE_NAME:?Variable DB_SERVICE_NAME not set in env file}"
 : "${BACKUP_ASSETSTORE_MIRROR:?Variable BACKUP_ASSETSTORE_MIRROR not set in env file}"
+
+NODE_EXPORTER_TEXTFILE_DIR="${NODE_EXPORTER_TEXTFILE_DIR:-/data/node-exporter-textfile}"
+BACKUP_METRICS_FILE="${BACKUP_METRICS_FILE:-dspace_backup.prom}"
+BACKUP_METRICS_ENV_LABEL="${BACKUP_METRICS_ENV_LABEL:-prod}"
+BACKUP_METRICS_SERVICE_LABEL="${BACKUP_METRICS_SERVICE_LABEL:-dspace}"
+
+if [[ "$DRY_RUN" == true ]]; then
+    emit_metrics_on_exit="0"
+fi
 
 resolve_absolute_path() {
     local raw_path="$1"
@@ -103,6 +116,66 @@ init_backup_dir() {
     printf 'ERROR: Cannot create backup directory with required permissions: %s\n' "$dir" >&2
     printf '       Run once with a user that can create it, or configure passwordless sudo for install -d.\n' >&2
     exit 1
+}
+
+ensure_metrics_dir() {
+    local dir="$1"
+    if mkdir -p "$dir" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local parent_dir
+    local base_name
+    parent_dir="$(dirname "$dir")"
+    base_name="$(basename "$dir")"
+
+    if [[ ! -d "$parent_dir" ]]; then
+        echo "ERROR: metrics parent directory does not exist: $parent_dir" >&2
+        return 1
+    fi
+
+    docker run --rm \
+        -v "$parent_dir:/parent" \
+        alpine:3.20 \
+        sh -c "mkdir -p '/parent/$base_name'" >/dev/null
+}
+
+emit_backup_metrics() {
+    ensure_metrics_dir "$NODE_EXPORTER_TEXTFILE_DIR" || {
+        echo "WARN: failed to prepare metrics dir: $NODE_EXPORTER_TEXTFILE_DIR" >&2
+        return 0
+    }
+
+    local metrics_payload
+    metrics_payload="$(cat <<EOF
+# HELP dspace_backup_last_run_timestamp_seconds Unix timestamp of the last DSpace backup attempt.
+# TYPE dspace_backup_last_run_timestamp_seconds gauge
+dspace_backup_last_run_timestamp_seconds{env="$BACKUP_METRICS_ENV_LABEL",service="$BACKUP_METRICS_SERVICE_LABEL"} $run_timestamp
+# HELP dspace_backup_last_success_timestamp_seconds Unix timestamp of the last successful DSpace backup.
+# TYPE dspace_backup_last_success_timestamp_seconds gauge
+dspace_backup_last_success_timestamp_seconds{env="$BACKUP_METRICS_ENV_LABEL",service="$BACKUP_METRICS_SERVICE_LABEL"} $success_timestamp
+# HELP dspace_backup_last_status Last DSpace backup status (1=success, 0=failure).
+# TYPE dspace_backup_last_status gauge
+dspace_backup_last_status{env="$BACKUP_METRICS_ENV_LABEL",service="$BACKUP_METRICS_SERVICE_LABEL"} $backup_status
+EOF
+)"
+
+    printf '%s\n' "$metrics_payload" | docker run --rm -i \
+        -v "$NODE_EXPORTER_TEXTFILE_DIR:/metrics" \
+        alpine:3.20 \
+        sh -c "cat > /metrics/$BACKUP_METRICS_FILE"
+}
+
+on_exit() {
+    local exit_code=$?
+    if [[ "$emit_metrics_on_exit" == "1" ]]; then
+        if [[ "$exit_code" -eq 0 && "$backup_status" != "1" ]]; then
+            backup_status="1"
+            success_timestamp="$(date +%s)"
+        fi
+        emit_backup_metrics
+    fi
+    exit "$exit_code"
 }
 
 # 3. Налаштування шляхів
@@ -177,6 +250,7 @@ partial_cleanup() {
 }
 
 trap partial_cleanup ERR
+trap on_exit EXIT
 
 log "=== Starting Backup Routine ==="
 
@@ -184,5 +258,8 @@ check_prerequisites
 backup_metadata
 backup_assetstore
 backup_cleanup
+
+backup_status="1"
+success_timestamp="$(date +%s)"
 
 log "=== Backup Finished ==="
