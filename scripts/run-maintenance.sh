@@ -63,36 +63,3 @@ echo "[$(date)] OAI import: start"
 run_dspace_cmd /dspace/bin/dspace oai import
 echo "[$(date)] Imported OAI records"
 
-#--- БЛОК БЕЗПЕЧНОГО РОЗМОНТУВАННЯ ---
-
-MOUNT_ROOT="/home/pinokew/GoogleDrive"
-SMB_MOUNT="/home/pinokew/Server/Local_SMB"
-
-echo "[$(date)] Unmounting drives..."
-
-# 1. Розмонтування Google Drive
-# Використовуємо nullglob, щоб цикл не відпрацював, якщо папка порожня
-shopt -s nullglob
-for mount_dir in "$MOUNT_ROOT"/*; do
-    if mountpoint -q "$mount_dir"; then
-        echo "[$(date)] Unmounting: $mount_dir"
-        if [[ "$DRY_RUN" == true ]]; then echo "[dry-run] fusermount -uz $mount_dir"; else fusermount -uz "$mount_dir"; fi
-    fi
-done
-shopt -u nullglob
-
-# 2. Розмонтування локального SMB (якщо змонтовано)
-if mountpoint -q "$SMB_MOUNT"; then
-    echo "[$(date)] Unmounting: $SMB_MOUNT"
-    if [[ "$DRY_RUN" == true ]]; then echo "[dry-run] fusermount -uz $SMB_MOUNT"; else fusermount -uz "$SMB_MOUNT"; fi
-fi
-
-# 3. Чекаємо завершення запису
-sleep 5
-
-# 4. Вбиваємо rclone (щоб не висів процес)
-# || true дозволяє скрипту йти далі, навіть якщо rclone не знайдено
-if [[ "$DRY_RUN" == true ]]; then echo "[dry-run] killall rclone"; else killall rclone 2>/dev/null || true; fi
-
-echo "[$(date)] All drives disconnected. System poweroff initiated."
-
