@@ -146,14 +146,15 @@ services:
       start_period: 60s
       
     # --- TRAEFIK CONFIGURATION FOR BACKEND ---
-    labels:
-    - "traefik.enable=true"
-    - "traefik.docker.network=${EXTERNAL_NETWORK}"
-    - "traefik.http.routers.dspace-api.rule=Host(`${DSPACE_HOSTNAME}`) && PathPrefix(`/server`)"
-    - "traefik.http.routers.dspace-api.entrypoints=web"
-    - "traefik.http.routers.dspace-api.priority=100"
-    - "traefik.http.routers.dspace-api.middlewares=forwarded-https@docker,security-headers@docker"
-    - "traefik.http.services.dspace-api.loadbalancer.server.port=8080"
+    deploy:
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=${EXTERNAL_NETWORK}"
+        - "traefik.http.routers.dspace-api.rule=Host(`${DSPACE_HOSTNAME}`) && PathPrefix(`/server`)"
+        - "traefik.http.routers.dspace-api.entrypoints=web"
+        - "traefik.http.routers.dspace-api.priority=100"
+        - "traefik.http.routers.dspace-api.middlewares=forwarded-https,security-headers"
+        - "traefik.http.services.dspace-api.loadbalancer.server.port=8080"
 
 
   # ===================================================
@@ -196,15 +197,16 @@ services:
       timeout: 3s
       retries: 10
       start_period: 60s
-    labels:
-    - "traefik.enable=true"
-    - "traefik.docker.network=${EXTERNAL_NETWORK}"
-    - "traefik.http.routers.dspace-ui.rule=Host(`${DSPACE_HOSTNAME}`)"
-    - "traefik.http.routers.dspace-ui.entrypoints=web"
-    - "traefik.http.routers.dspace-ui.priority=10"
-    - "traefik.http.routers.dspace-ui.middlewares=forwarded-https@docker,security-headers@docker"
-    - "traefik.http.services.dspace-ui.loadbalancer.server.port=8081"
-    - "traefik.http.services.dspace-ui.loadbalancer.passhostheader=true"
+    deploy:
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=${EXTERNAL_NETWORK}"
+        - "traefik.http.routers.dspace-ui.rule=Host(`${DSPACE_HOSTNAME}`)"
+        - "traefik.http.routers.dspace-ui.entrypoints=web"
+        - "traefik.http.routers.dspace-ui.priority=10"
+        - "traefik.http.routers.dspace-ui.middlewares=forwarded-https,security-headers"
+        - "traefik.http.services.dspace-ui.loadbalancer.server.port=8081"
+        - "traefik.http.services.dspace-ui.loadbalancer.passhostheader=true"
 
 networks:
   dspacenet:
