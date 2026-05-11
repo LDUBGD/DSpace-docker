@@ -102,7 +102,7 @@ services:
           - node.labels.app_zone == manager
       labels:
         - "traefik.enable=true"
-        - "traefik.docker.network=${EXTERNAL_NETWORK}"
+        - "traefik.swarm.network=${EXTERNAL_NETWORK}"
         - "traefik.http.routers.dspace-api.rule=Host(`${DSPACE_HOSTNAME}`) && PathPrefix(`/server`)"
         - "traefik.http.routers.dspace-api.entrypoints=web"
         - "traefik.http.routers.dspace-api.priority=100"
@@ -145,7 +145,7 @@ services:
           - node.labels.app_zone == manager
       labels:
         - "traefik.enable=true"
-        - "traefik.docker.network=${EXTERNAL_NETWORK}"
+        - "traefik.swarm.network=${EXTERNAL_NETWORK}"
         - "traefik.http.routers.dspace-ui.rule=Host(`${DSPACE_HOSTNAME}`)"
         - "traefik.http.routers.dspace-ui.entrypoints=web"
         - "traefik.http.routers.dspace-ui.priority=10"
