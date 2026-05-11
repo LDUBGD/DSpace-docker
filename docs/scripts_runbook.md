@@ -197,6 +197,21 @@ bash scripts/test-restore.sh --env prod /data/backup/dspace/cloud_metadata_YYYY-
 bash scripts/test-restore.sh --env prod --dry-run
 ```
 
+### `scripts/cleanup-assetstore-orphans.sh`
+
+#### Бізнес-логіка
+- Запускає штатний DSpace CLI cleanup: `/dspace/bin/dspace cleanup --verbose`.
+- Видаляє orphan/deleted bitstreams з assetstore через DSpace storage layer, без власного SQL або ручного filesystem-cleanup.
+- Swarm-aware: виконує команду в сервісі `dspace` через `scripts/lib/docker-runtime.sh`.
+- `--dry-run` тільки показує команду, не змінюючи assetstore.
+
+#### Manual execution
+```bash
+bash scripts/cleanup-assetstore-orphans.sh --env dev --dry-run
+bash scripts/cleanup-assetstore-orphans.sh --env prod --dry-run
+SERVER_ENV=prod bash scripts/cleanup-assetstore-orphans.sh
+```
+
 ### `scripts/restore-backup.sh`
 
 #### Бізнес-логіка
