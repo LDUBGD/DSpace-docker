@@ -88,14 +88,9 @@ ENVIRONMENT="$(resolve_environment "${1:-}")"
 ```bash
 _decrypt_env() {
   local enc_file="$1"
-  local age_key_file="${SOPS_AGE_KEY_FILE:-${HOME}/.config/age/keys.txt}"
 
   if [[ ! -f "${enc_file}" ]]; then
     echo "ERROR: encrypted env file not found: ${enc_file}" >&2
-    exit 1
-  fi
-  if [[ ! -f "${age_key_file}" ]]; then
-    echo "ERROR: AGE key file not found: ${age_key_file}" >&2
     exit 1
   fi
 
@@ -103,7 +98,7 @@ _decrypt_env() {
   chmod 600 "${ENV_TMP}"
   trap '_cleanup_env_tmp' EXIT
 
-  sops --decrypt --age-key-file "${age_key_file}" "${enc_file}" > "${ENV_TMP}"
+  sops --decrypt --input-type dotenv --output-type dotenv "${enc_file}" > "${ENV_TMP}"
 }
 
 _cleanup_env_tmp() {
@@ -210,6 +205,7 @@ fi
 | `check-secrets-hygiene.sh` | 1а | Перевірка без секретів |
 | `verify-env.sh` | 1а | source дозволено тут |
 | `init-volumes.sh` | 1б | Ініціалізація bind-mount директорій |
+| `render-versioned-env-secret.sh` | 1б | Рендерить immutable Docker secrets з hash-based назвами для env payload і external secrets |
 | `bootstrap-live-configs.sh` | 1б | Генерація конфігів |
 | `koha-lockdown-password-prefs.sh` | 1б | Harden налаштувань |
 | `patch/` | 1б | Патч-скрипти |
@@ -353,8 +349,9 @@ fi
 - Оновлений код кожного скрипта 1б
 - Оновлений `deploy-orchestrator-swarm.sh` з викликами в правильному порядку: 1а → 1б → `docker compose config` → `docker stack deploy`
 - Bash-команди для ручного тестування кожного скрипта:
-  - Розшифровка: `sops --decrypt env.dev.enc > /tmp/env.test && chmod 600 /tmp/env.test`
-  - Запуск: `ORCHESTRATOR_ENV_FILE=/tmp/env.test bash scripts/<script>.sh`
+  - Розшифровка: `ENV_TMP="$(mktemp /dev/shm/env-XXXXXX)" && chmod 600 "${ENV_TMP}" && sops --decrypt --input-type dotenv --output-type dotenv env.dev.enc > "${ENV_TMP}"`
+  - Запуск: `ORCHESTRATOR_ENV_FILE="${ENV_TMP}" bash scripts/<script>.sh`
+  - Cleanup: `shred -u "${ENV_TMP}" 2>/dev/null || rm -f "${ENV_TMP}"`
   - Перевірка: `diff <expected> <generated>` або `echo $?`
 
 ---
@@ -395,14 +392,12 @@ _cleanup_env_tmp() {
 
 _decrypt_env() {
   local enc_file="$1"
-  local age_key_file="${SOPS_AGE_KEY_FILE:-${HOME}/.config/age/keys.txt}"
   [[ -f "${enc_file}" ]]    || die "encrypted env file not found: ${enc_file}"
-  [[ -f "${age_key_file}" ]] || die "AGE key file not found: ${age_key_file}"
 
   ENV_TMP="$(mktemp /dev/shm/env-XXXXXX)"
   chmod 600 "${ENV_TMP}"
   trap '_cleanup_env_tmp' EXIT
-  sops --decrypt --age-key-file "${age_key_file}" "${enc_file}" > "${ENV_TMP}"
+  sops --decrypt --input-type dotenv --output-type dotenv "${enc_file}" > "${ENV_TMP}"
 }
 
 # --- Основна логіка ---
@@ -442,7 +437,7 @@ set -a; source "${ENV_TMP}"; set +a
 
 **Артефакт Кроку 4:**
 - Оновлений код кожного автономного скрипта (змінений тільки env-блок)
-- Команди для ручного тестування: `SERVER_ENV=dev bash scripts/backup.sh` або `bash scripts/backup.sh dev`
+- Команди для ручного тестування: `SERVER_ENV=dev bash scripts/backup.sh`, `bash scripts/backup.sh dev` або `bash scripts/backup.sh --env dev`
 
 ---
 
@@ -468,7 +463,7 @@ bash scripts/check-internal-ports-policy.sh
 ```bash
 # 1. Розшифрувати env у тимчасовий файл:
 ENV_TMP="$(mktemp /dev/shm/env-XXXXXX)" && chmod 600 "${ENV_TMP}"
-sops --decrypt env.dev.enc > "${ENV_TMP}"
+sops --decrypt --input-type dotenv --output-type dotenv env.dev.enc > "${ENV_TMP}"
 
 # 2. Запустити скрипт:
 ORCHESTRATOR_ENV_FILE="${ENV_TMP}" bash scripts/init-volumes.sh
@@ -481,6 +476,7 @@ shred -u "${ENV_TMP}" 2>/dev/null || rm -f "${ENV_TMP}"
 ```bash
 # Запустити з явним середовищем або через SERVER_ENV:
 bash scripts/backup.sh dev
+bash scripts/backup.sh --env dev
 # або якщо SERVER_ENV вже є в оточенні:
 bash scripts/backup.sh
 ```

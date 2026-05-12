@@ -271,3 +271,58 @@
 - `bash -n scripts/setup-configs.sh scripts/deploy-orchestrator-swarm.sh scripts/patch-local.cfg.sh scripts/patch-config.yml.sh scripts/patch-submission-forms.sh` — OK.
 - `shellcheck scripts/setup-configs.sh scripts/deploy-orchestrator-swarm.sh scripts/patch-local.cfg.sh scripts/patch-config.yml.sh scripts/patch-submission-forms.sh` — OK.
 - `bash scripts/setup-configs.sh --help` — OK.
+
+## 2026-05-07 — Versioned Swarm env secrets renderer
+
+### Зроблено
+- Додано `scripts/render-versioned-env-secret.sh` за Koha-патерном immutable Docker secrets із hash suffix.
+- Renderer створює:
+  - `DSPACE_POSTGRES_PASSWORD_SECRET_NAME` з hash значення `POSTGRES_PASSWORD`;
+  - `DSPACE_APP_ENV_PAYLOAD_SECRET_NAME` з hash runtime env payload без generated `*_SECRET_NAME`.
+- `scripts/deploy-orchestrator-swarm.sh` тепер викликає renderer перед `docker compose config`, щоб Swarm manifest отримував актуальні versioned secret names.
+- `.env.example` доповнено generated secret contract із placeholder hash-назвами та secret base variables.
+
+### Перевірено
+- `bash -n scripts/render-versioned-env-secret.sh scripts/deploy-orchestrator-swarm.sh` — OK.
+- `shellcheck scripts/render-versioned-env-secret.sh scripts/deploy-orchestrator-swarm.sh` — OK.
+- Renderer перевірено з mock `docker secret`: `POSTGRES_PASSWORD=change_me` зрендерив `dspace_postgres_password_fb86fb757d12`, payload secret отримав hash suffix, обидві назви записались у test env file.
+- `docker compose --env-file <test-env> -f docker-compose.yml -f docker-compose.swarm.yml config` — OK; manifest підставив versioned names для `app_env_payload` і `postgres_password`.
+
+### Data/impact
+- Реальні Docker secrets не створювались під час тесту; використовувався mock `docker`.
+- Реальні `env.dev.enc` і `env.prod.enc` не змінювались.
+
+## 2026-05-08 — DSpace backup/restore textfile metrics and smoke restore
+
+### Зроблено
+- `scripts/backup-dspace.sh` тепер публікує `dspace_backup_*` textfile metrics у `NODE_EXPORTER_TEXTFILE_DIR`.
+- `--dry-run` для backup не оновлює freshness-метрики, щоб не маскувати відсутність реального backup.
+- Додано `scripts/test-restore.sh`: smoke restore імпортує SQL dump із найновішого backup archive у тимчасовий PostgreSQL container і публікує `dspace_restore_smoke_*`.
+- `.env.example` доповнено `NODE_EXPORTER_TEXTFILE_DIR`, `BACKUP_METRICS_FILE`, `RESTORE_SMOKE_METRICS_FILE`.
+- `docs/scripts_runbook.md` оновлено manual execution для backup metrics і smoke restore.
+
+### Перевірено
+- `SERVER_ENV=prod bash scripts/backup-dspace.sh` успішно створив `cloud_metadata_2026-05-08_21-22.tar.gz`, `full_local_2026-05-08_21-22.tar.gz`, виконав rclone upload/check і записав `dspace_backup.prom`.
+- `SERVER_ENV=prod bash scripts/test-restore.sh` успішно імпортував SQL у тимчасовий PostgreSQL container; sanity check показав `63` таблиці і записав `dspace_restore_smoke.prom`.
+- Node exporter читає `dspace_backup_*` і `dspace_restore_smoke_*` зі status `1`.
+- VictoriaMetrics бачить обидві success-метрики з labels `job="node-exporter"`, `service="host"`, `exported_service="dspace"`.
+
+### Data/impact
+- Реальний backup/upload і restore smoke test виконано в prod-контексті, але restore smoke використовував тільки тимчасовий PostgreSQL container і не змінював production DSpace DB.
+
+## 2026-05-11 — Assetstore orphan cleanup wrapper
+
+### Зроблено
+- Додано `scripts/cleanup-assetstore-orphans.sh` для запуску штатного DSpace cleanup через `/dspace/bin/dspace cleanup --verbose`.
+- Скрипт використовує існуючий autonomous env-loading (`--env dev|prod` / `SERVER_ENV`) і Swarm-aware runtime helper `scripts/lib/docker-runtime.sh`.
+- Додано `--dry-run`, який друкує команду без змін в assetstore.
+- `docs/scripts_runbook.md` доповнено manual execution для cleanup-скрипта.
+
+### Перевірено
+- `bash -n scripts/cleanup-assetstore-orphans.sh` — OK.
+- `shellcheck scripts/cleanup-assetstore-orphans.sh` — OK.
+- `bash scripts/cleanup-assetstore-orphans.sh --env prod --dry-run` — OK, mutation не виконувалась.
+- `bash scripts/cleanup-assetstore-orphans.sh --env prod` — OK; DSpace cleanup завершився без крешів, знайдено `0` deleted bitstream.
+
+### Data/impact
+- Реальний cleanup виконано в prod-контексті штатною командою DSpace; orphan/deleted bitstreams для видалення не знайдено.

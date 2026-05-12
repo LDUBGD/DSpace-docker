@@ -272,6 +272,23 @@ run_ansible_secrets_if_configured() {
     --tags secrets
 }
 
+run_versioned_env_secret_renderer() {
+  local render_script
+
+  render_script="${SCRIPT_DIR}/render-versioned-env-secret.sh"
+
+  if [[ -x "${render_script}" ]]; then
+    log "Rendering versioned Swarm env secrets: ${render_script}"
+    ORCHESTRATOR_ENV_FILE="${ENV_FILE}" "${render_script}" --write-env-file "${ENV_FILE}" >/dev/null
+  elif [[ -f "${render_script}" ]]; then
+    log "Rendering versioned Swarm env secrets via bash: ${render_script}"
+    ORCHESTRATOR_ENV_FILE="${ENV_FILE}" bash "${render_script}" --write-env-file "${ENV_FILE}" >/dev/null
+  else
+    log "ERROR: versioned env secret renderer not found: ${render_script}"
+    exit 1
+  fi
+}
+
 deploy_swarm() {
   local compose_file swarm_file raw_manifest deploy_manifest
 
@@ -306,6 +323,7 @@ deploy_swarm() {
   prepare_deploy_state
   validate_runtime_env_file
   run_ansible_secrets_if_configured
+  run_versioned_env_secret_renderer
   run_validation_scripts
   run_deploy_adjacent_scripts
 
