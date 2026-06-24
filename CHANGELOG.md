@@ -3,14 +3,7 @@
 Дата оновлення: 2026-04-08
 
 Активний том:
-- `CHANGELOGS/CHANGELOG_2026_VOL_04.md`
-
-## Томи
-
-1. `CHANGELOGS/CHANGELOG_2026_VOL_01.md` — archived (заповнений том, 2026 рік)
-2. `CHANGELOGS/CHANGELOG_2026_VOL_02.md` — archived (досягнуто soft limit, 2026 рік)
-3. `CHANGELOGS/CHANGELOG_2026_VOL_03.md` — archived (досягнуто soft limit, 2026 рік)
-4. `CHANGELOGS/CHANGELOG_2026_VOL_04.md` — **ACTIVE** (поточний том, 2026 рік)
+- `docs/changelogs/CHANGELOG_2026_VOL_05.md`
 
 ## Правила
 
